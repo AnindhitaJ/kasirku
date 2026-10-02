@@ -5,131 +5,223 @@ const slug=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,'.').replace(/^\.|\.$/g,'');
 const ok=async p=>{const r=await p;if(r.error){toast(r.error.message||'Terjadi kesalahan');throw r.error}return r.data};
 const fe=async e=>{try{return await e.context.text()}catch(_){return e.message}};
 const MV={in:'Stok masuk',out:'Stok keluar',adjustment:'Adjustment',sale:'Penjualan'},MVR={'Stok masuk':'in','Stok keluar':'out','Adjustment':'adjustment'};
-const idMap={};let _n=1;const lid=u=>u?(idMap[u]||(idMap[u]=_n++)):0;  // uuid -> id lokal (dipakai di onclick)
-async function emp(b) {
-
-  try {
-
-    // Ambil session login Owner
-    const {
-      data: sessionData,
-      error: sessionError
-
-    } = await db.auth.getSession();
+const idMap={};let _n=1;const lid=u=>u?(idMap[u]||(idMap[u]=_n++)):0;
 
 
-    if (sessionError) {
+// ===============================
+// EDGE FUNCTION CREATE EMPLOYEE
+// ===============================
+async function emp(b){
 
-      console.error(
-        "Gagal mengambil session:",
-        sessionError
-      );
-
-      throw sessionError;
-
-    }
-
-
-    const session = sessionData.session;
+ const {
+  data:{
+   session
+  },
+  error:sessionError
+ } = await db.auth.getSession();
 
 
-    if (!session) {
-
-      throw new Error(
-        "Session kosong. Silakan login ulang."
-      );
-
-    }
+ if(sessionError){
+  throw sessionError;
+ }
 
 
-    console.log(
-      "OWNER LOGIN:",
-      session.user.email
-    );
+ if(!session){
+  throw new Error(
+   'Session login tidak ditemukan. Silakan login ulang.'
+  );
+ }
 
 
-    console.log(
-      "ACCESS TOKEN:",
-      session.access_token
-    );
+ const {
+  data,
+  error
+ } = await db.functions.invoke(
+  'create-employee',
+  {
+   body:b,
 
-
-    // Panggil Edge Function create-employee
-    const {
-      data,
-      error
-
-    } = await db.functions.invoke(
-      'create-employee',
-      {
-
-        body: b,
-
-        headers: {
-
-          Authorization:
-            `Bearer ${session.access_token}`
-
-        }
-
-      }
-    );
-
-
-    if (error) {
-
-      console.error(
-        "Edge Function Error:",
-        error
-      );
-
-      throw error;
-
-    }
-
-
-    return data;
-
-
-  } catch (err) {
-
-    console.error(
-      "EMP ERROR:",
-      err
-    );
-
-    throw err;
-
+   headers:{
+    Authorization:
+    `Bearer ${session.access_token}`
+   }
   }
+ );
+
+
+ if(error){
+  console.error(
+   'Edge Function Error:',
+   error
+  );
+
+  throw error;
+ }
+
+
+ return data;
 
 }
+
+
+function save(){}
+
 
 /* ---- Muat data ---- */
 async function loadStores(){
  const st=await ok(db.from('kk_stores').select('id,name,owner_id,kk_products(count)').order('created_at'));
- S.stores=st.map(s=>({id:s.id,name:s.name,prods:Array(s.kk_products[0].count).fill(0),cats:[],txs:[],moves:[],week:[]}));return st}
+ S.stores=st.map(s=>({id:s.id,name:s.name,prods:Array(s.kk_products[0].count).fill(0),cats:[],txs:[],moves:[],week:[]}));
+ return st
+}
+
+
 async function loadStore(id,reset){
- syncBack();S.sid=id;if(reset){S.cart=[];S.cat='Semua';S.q='';S.pq=''}
+ syncBack();
+ S.sid=id;
+
+ if(reset){
+  S.cart=[];
+  S.cat='Semua';
+  S.q='';
+  S.pq=''
+ }
+
  const since=new Date(Date.now()-7*864e5).toISOString();
+
  const [cats,prods,txs,mv]=await Promise.all([
   ok(db.from('kk_categories').select('id,name').eq('store_id',id).order('name')),
   ok(db.from('kk_products').select('*').eq('store_id',id).order('name')),
   ok(db.from('kk_transactions').select('invoice_no,payment_method,total,created_at,kk_transaction_items(product_id,name,price,qty)').eq('store_id',id).gte('created_at',since).order('created_at')),
-  ok(db.from('kk_stock_movements').select('type,qty,note,created_at,kk_products(name)').eq('store_id',id).order('created_at',{ascending:false}).limit(50))]);
- S.catRows=cats;S.cats=cats.map(c=>c.name);S.cats.forEach(c=>hue[c]=hue[c]||'200 55% 88%');
- S.prods=prods.map(p=>({id:lid(p.id),uid:p.id,n:p.name,c:(cats.find(c=>c.id===p.category_id)||{}).name||'-',p:+p.price,m:+p.cost,s:p.stock,min:p.min_stock}));
- const d0=new Date();d0.setHours(0,0,0,0);S.txs=[];S.week=[0,0,0,0,0,0];
- txs.forEach(t=>{const dt=new Date(t.created_at);
-  if(dt>=d0)S.txs.push({no:t.invoice_no,t:dt.toTimeString().slice(0,5),pay:t.payment_method,total:+t.total,items:t.kk_transaction_items.map(i=>({id:lid(i.product_id),n:i.name,p:+i.price,q:i.qty}))});
-  else{const ago=Math.ceil((d0-dt)/864e5);if(ago>=1&&ago<=6)S.week[6-ago]+=+t.total}});
- S.moves=mv.map(m=>({t:new Date(m.created_at).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}),n:(m.kk_products||{}).name||'(produk dihapus)',type:MV[m.type],q:m.q,note:m.note||'-'}));
- syncBack()}
+  ok(db.from('kk_stock_movements').select('type,qty,note,created_at,kk_products(name)').eq('store_id',id).order('created_at',{ascending:false}).limit(50))
+ ]);
+
+ S.catRows=cats;
+ S.cats=cats.map(c=>c.name);
+
+ S.cats.forEach(c=>{
+  hue[c]=hue[c]||'200 55% 88%'
+ });
+
+
+ S.prods=prods.map(p=>({
+  id:lid(p.id),
+  uid:p.id,
+  n:p.name,
+  c:(cats.find(c=>c.id===p.category_id)||{}).name||'-',
+  p:+p.price,
+  m:+p.cost,
+  s:p.stock,
+  min:p.min_stock
+ }));
+
+ const d0=new Date();
+ d0.setHours(0,0,0,0);
+
+ S.txs=[];
+ S.week=[0,0,0,0,0,0];
+
+
+ txs.forEach(t=>{
+
+  const dt=new Date(t.created_at);
+
+  if(dt>=d0){
+
+   S.txs.push({
+    no:t.invoice_no,
+    t:dt.toTimeString().slice(0,5),
+    pay:t.payment_method,
+    total:+t.total,
+    items:t.kk_transaction_items.map(i=>({
+     id:lid(i.product_id),
+     n:i.name,
+     p:+i.price,
+     q:i.qty
+    }))
+   });
+
+  }else{
+
+   const ago=Math.ceil((d0-dt)/864e5);
+
+   if(ago>=1&&ago<=6)
+    S.week[6-ago]+=+t.total;
+
+  }
+
+ });
+
+
+ S.moves=mv.map(m=>({
+  t:new Date(m.created_at).toLocaleString('id-ID',{
+   day:'numeric',
+   month:'short',
+   hour:'2-digit',
+   minute:'2-digit'
+  }),
+  n:(m.kk_products||{}).name||'(produk dihapus)',
+  type:MV[m.type],
+  q:m.q,
+  note:m.note||'-'
+ }));
+
+ syncBack()
+
+}
+
+
 async function loadStaff(){
- if(S.user!=='owner'){S.users=[{id:S.uid,role:'kasir',stores:S.stores.map(s=>s.id)}];return}
- const rows=await ok(db.from('kk_members').select('user_id,name,store_id,kk_member_secrets(password_plain)'));const g={};
- rows.forEach(r=>{const x=r.kk_member_secrets,pw=Array.isArray(x)?(x[0]||{}).password_plain:(x||{}).password_plain;
-  const u=g[r.user_id]||(g[r.user_id]={id:r.user_id,name:r.name,role:'kasir',password:pw||'-',stores:[]});u.stores.push(r.store_id)});
- S.users=Object.values(g)}
+
+ if(S.user!=='owner'){
+  S.users=[
+   {
+    id:S.uid,
+    role:'kasir',
+    stores:S.stores.map(s=>s.id)
+   }
+  ];
+
+  return;
+ }
+
+
+ const rows=await ok(
+  db.from('kk_members')
+  .select('user_id,name,store_id,kk_member_secrets(password_plain)')
+ );
+
+
+ const g={};
+
+
+ rows.forEach(r=>{
+
+  const x=r.kk_member_secrets;
+
+  const pw=Array.isArray(x)
+   ? (x[0]||{}).password_plain
+   : (x||{}).password_plain;
+
+
+  const u=g[r.user_id] || (
+   g[r.user_id]={
+    id:r.user_id,
+    name:r.name,
+    role:'kasir',
+    password:pw||'-',
+    stores:[]
+   }
+  );
+
+
+  u.stores.push(r.store_id);
+
+ });
+
+
+ S.users=Object.values(g)
+
+}
 async function newStore(name,uid){
  const s=await ok(db.from('kk_stores').insert({owner_id:uid,name}).select('id').single());
  await ok(db.from('kk_categories').insert(DEFCATS.map(n=>({store_id:s.id,name:n}))));return s}
