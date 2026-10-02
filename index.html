@@ -108,7 +108,7 @@ function go(v){S.view=v;render()}
 function dash(){
  const rev=S.txs.reduce((s,t)=>s+t.total,0),qty=S.txs.reduce((s,t)=>s+t.items.reduce((a,i)=>a+i.q,0),0);
  const days=['Rab','Kam','Jum','Sab','Min','Sen'],vals=[...S.week,rev],max=Math.max(...vals);
- const lbl=[...days.slice(0,0),'Rab','Kam','Jum','Sab','Min','Hari ini'];
+ const H=['Min','Sen','Sel','Rab','Kam','Jum','Sab'],lbl=vals.map((_,i)=>i==6?'Hari ini':H[new Date(Date.now()-(6-i)*864e5).getDay()]);
  const cnt={};S.txs.forEach(t=>t.items.forEach(i=>cnt[i.n]=(cnt[i.n]||0)+i.q));
  const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,5);
  const low=S.prods.filter(p=>p.s<=p.min);
@@ -372,6 +372,9 @@ function saveStaff(uid){const name=gv('un').trim(),password=gv('up').trim();
  save();closeM();toast('Akun disimpan');team()}
 save();render();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app-supabase.js"></script>
 <script>if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))</script>
 </body>
 </html>
