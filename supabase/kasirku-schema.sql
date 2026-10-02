@@ -76,7 +76,6 @@ create table kk_stock_movements (
 create index on kk_products (store_id);
 create index on kk_transactions (store_id, created_at desc);
 create index on kk_stock_movements (store_id, created_at desc);
-create unique index kk_members_name_key on kk_members (lower(name));
 
 -- Helper akses
 create function kk_is_owner(sid uuid) returns boolean
