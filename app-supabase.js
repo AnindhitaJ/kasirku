@@ -6,36 +6,103 @@ const ok=async p=>{const r=await p;if(r.error){toast(r.error.message||'Terjadi k
 const fe=async e=>{try{return await e.context.text()}catch(_){return e.message}};
 const MV={in:'Stok masuk',out:'Stok keluar',adjustment:'Adjustment',sale:'Penjualan'},MVR={'Stok masuk':'in','Stok keluar':'out','Adjustment':'adjustment'};
 const idMap={};let _n=1;const lid=u=>u?(idMap[u]||(idMap[u]=_n++)):0;  // uuid -> id lokal (dipakai di onclick)
-const emp=async(b)=>{
+async function emp(b) {
 
-  const {
-    data:{
-      session
+  try {
+
+    // Ambil session login Owner
+    const {
+      data: sessionData,
+      error: sessionError
+
+    } = await db.auth.getSession();
+
+
+    if (sessionError) {
+
+      console.error(
+        "Gagal mengambil session:",
+        sessionError
+      );
+
+      throw sessionError;
+
     }
-  } = await db.auth.getSession();
 
 
-  if(!session){
-    throw new Error(
-      'Session login tidak ditemukan'
+    const session = sessionData.session;
+
+
+    if (!session) {
+
+      throw new Error(
+        "Session kosong. Silakan login ulang."
+      );
+
+    }
+
+
+    console.log(
+      "OWNER LOGIN:",
+      session.user.email
     );
+
+
+    console.log(
+      "ACCESS TOKEN:",
+      session.access_token
+    );
+
+
+    // Panggil Edge Function create-employee
+    const {
+      data,
+      error
+
+    } = await db.functions.invoke(
+      'create-employee',
+      {
+
+        body: b,
+
+        headers: {
+
+          Authorization:
+            `Bearer ${session.access_token}`
+
+        }
+
+      }
+    );
+
+
+    if (error) {
+
+      console.error(
+        "Edge Function Error:",
+        error
+      );
+
+      throw error;
+
+    }
+
+
+    return data;
+
+
+  } catch (err) {
+
+    console.error(
+      "EMP ERROR:",
+      err
+    );
+
+    throw err;
+
   }
 
-
-  return await db.functions.invoke(
-    'create-employee',
-    {
-      body:b,
-
-      headers:{
-        Authorization:
-        `Bearer ${session.access_token}`
-      }
-    }
-  );
-
-};
-function save(){}
+}
 
 /* ---- Muat data ---- */
 async function loadStores(){
