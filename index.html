@@ -280,7 +280,7 @@ function rep(){const rev=S.txs.reduce((s,t)=>s+t.total,0),n=S.txs.length;
 
 load();render();
 </script>
-<style>@media (max-width:899px){nav button{font-size:11px}main{padding-top:56px}}</style>
+<style>@media (max-width:899px){nav button{font-size:11px}main{padding-top:56px}}.shell:has(nav[style*="display: none"]){grid-template-columns:1fr}</style>
 <script>
 /* Multi-toko: Owner -> Toko -> Karyawan (tanpa role Admin) */
 delete ROLES.admin;ROLES.owner.v.push('team');LBL.team='Toko';
@@ -370,7 +370,7 @@ function saveStaff(uid){const name=gv('un').trim(),password=gv('up').trim();
  const st=S.stores.filter(s=>document.getElementById('cb_'+s.id).checked).map(s=>s.id);if(!st.length){toast('Pilih minimal satu toko');return}
  if(uid)Object.assign(S.users.find(x=>x.id===uid),{name,password,stores:st});else S.users.push({id:'u'+Date.now(),name,password,role:'kasir',stores:st});
  save();closeM();toast('Akun disimpan');team()}
-save();
+save();render();
 </script>
 <script>if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))</script>
 </body>
