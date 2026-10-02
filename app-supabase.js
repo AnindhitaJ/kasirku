@@ -6,7 +6,7 @@ const ok=async p=>{const r=await p;if(r.error){toast(r.error.message||'Terjadi k
 const fe=async e=>{try{return await e.context.text()}catch(_){return e.message}};
 const MV={in:'Stok masuk',out:'Stok keluar',adjustment:'Adjustment',sale:'Penjualan'},MVR={'Stok masuk':'in','Stok keluar':'out','Adjustment':'adjustment'};
 const idMap={};let _n=1;const lid=u=>u?(idMap[u]||(idMap[u]=_n++)):0;  // uuid -> id lokal (dipakai di onclick)
-const emp=(b)=>db.functions.invoke('manage-employee',{body:b});
+const emp=(b)=>db.functions.invoke('create-employee',{body:b});
 function save(){}
 
 /* ---- Muat data ---- */
