@@ -6,7 +6,7 @@ const ok=async p=>{const r=await p;if(r.error){toast(r.error.message||'Terjadi k
 const fe=async e=>{try{return await e.context.text()}catch(_){return e.message}};
 const MV={in:'Stok masuk',out:'Stok keluar',adjustment:'Adjustment',sale:'Penjualan'},MVR={'Stok masuk':'in','Stok keluar':'out','Adjustment':'adjustment'};
 const idMap={};let _n=1;const lid=u=>u?(idMap[u]||(idMap[u]=_n++)):0;  // uuid -> id lokal (dipakai di onclick)
-const emp=(b)=>db.functions.invoke('create-employee',{body:b});
+const emp=(b)=>db.functions.invoke('manage-employee',{body:b});
 function save(){}
 
 /* ---- Muat data ---- */
@@ -27,7 +27,7 @@ async function loadStore(id,reset){
  txs.forEach(t=>{const dt=new Date(t.created_at);
   if(dt>=d0)S.txs.push({no:t.invoice_no,t:dt.toTimeString().slice(0,5),pay:t.payment_method,total:+t.total,items:t.kk_transaction_items.map(i=>({id:lid(i.product_id),n:i.name,p:+i.price,q:i.qty}))});
   else{const ago=Math.ceil((d0-dt)/864e5);if(ago>=1&&ago<=6)S.week[6-ago]+=+t.total}});
- S.moves=mv.map(m=>({t:new Date(m.created_at).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}),n:(m.kk_products||{}).name||'(produk dihapus)',type:MV[m.type],q:m.q,note:m.note||'-'}));
+ S.moves=mv.map(m=>({t:new Date(m.created_at).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}),n:(m.kk_products||{}).name||'(produk dihapus)',type:MV[m.type],q:m.qty,note:m.note||'-'}));
  syncBack()}
 async function loadStaff(){
  if(S.user!=='owner'){S.users=[{id:S.uid,role:'kasir',stores:S.stores.map(s=>s.id)}];return}
