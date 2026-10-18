@@ -23,29 +23,29 @@ body{margin:0;background:var(--bg);color:var(--ink);font:500 15px/1.45 "Plus Jak
 button,input,select{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--em);outline-offset:2px}
-.shell{display:grid;grid-template-columns:200px 1fr;min-height:100vh}
+.shell{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}
 nav{background:var(--card);border-right:1px solid var(--line);padding:20px 12px;position:sticky;top:0;height:100vh}
 .brand{font-weight:800;font-size:20px;padding:0 10px 18px;letter-spacing:-.02em}.brand b{color:var(--em)}
 nav button{display:block;width:100%;text-align:left;background:none;border:0;padding:10px 12px;border-radius:10px;margin-bottom:2px;color:var(--mute);font-weight:600}
 nav button.on{background:var(--em-l);color:var(--em-d)}
-main{padding:24px;max-width:1100px;width:100%}
+main{padding:24px;max-width:1100px;width:100%;min-width:0}
 h1{font-size:24px;margin:0 0 4px;letter-spacing:-.02em}.sub{color:var(--mute);margin:0 0 20px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
 .hero{background:var(--em);color:#fff;border:0;display:flex;flex-wrap:wrap;gap:12px 40px;align-items:flex-end;padding:22px}
 .hero .big{font-size:40px;font-weight:800;letter-spacing:-.03em;line-height:1.1}
 .hero small{opacity:.85;display:block}
-.grid{display:grid;gap:14px;margin-top:14px}.g2{grid-template-columns:1.4fr 1fr}
+.grid{display:grid;gap:14px;margin-top:14px}.g2{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
 .bars{display:flex;align-items:flex-end;gap:10px;height:150px;margin-top:10px}
 .bars div{flex:1;text-align:center;font-size:12px;color:var(--mute);display:flex;flex-direction:column;justify-content:flex-end;height:100%}
 .bars i{display:block;background:var(--em-l);border-radius:6px 6px 2px 2px;margin-bottom:6px}.bars .t i{background:var(--em)}
 h3{margin:0 0 10px;font-size:15px}
 .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}.row:first-of-type{border-top:0}
 .tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--em-l);color:var(--em-d)}.tag.w{background:var(--warn-l);color:var(--warn)}
-.pos{display:grid;grid-template-columns:1fr 340px;gap:14px;align-items:start}
+.pos{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
 .tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 input,select{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
 .tools input{flex:1;min-width:140px}
-.chips{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:2px}
+.chips{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:2px;min-width:0;max-width:100%}
 .chip{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 14px;white-space:nowrap;font-weight:600;color:var(--mute)}
 .chip.on{background:var(--em);border-color:var(--em);color:#fff}
 .prods{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
@@ -68,10 +68,10 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 8px
 .f{display:grid;gap:10px}.f label{display:grid;gap:4px;font-size:13px;color:var(--mute)}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;display:none;z-index:10}
 @media (max-width:899px){
-.shell{grid-template-columns:1fr}
+.shell{grid-template-columns:minmax(0,1fr)}
 nav{position:fixed;top:auto;bottom:0;left:0;right:0;height:auto;z-index:5;border-right:0;border-top:1px solid var(--line);display:flex;padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px))}
 .brand{display:none}nav button{text-align:center;font-size:12px;padding:8px 2px;margin:0}
-main{padding:16px 16px 90px}.g2,.pos{grid-template-columns:1fr}.cart{position:static}.hero .big{font-size:32px}}
+main{padding:16px 16px 90px}.g2,.pos{grid-template-columns:minmax(0,1fr)}.cart{position:static}.hero .big{font-size:32px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -284,7 +284,7 @@ function rep(){const rev=S.txs.reduce((s,t)=>s+t.total,0),n=S.txs.length;
 
 load();render();
 </script>
-<style>@media (max-width:899px){nav button{font-size:11px}main{padding-top:56px}}.shell:has(nav[style*="display: none"]){grid-template-columns:1fr}</style>
+<style>@media (max-width:899px){nav button{font-size:11px}main{padding-top:56px}}.shell:has(nav[style*="display: none"]){grid-template-columns:minmax(0,1fr)}.tools>*{min-width:0}html,body{max-width:100%;overflow-x:hidden}</style>
 <script>
 /* Multi-toko: Owner -> Toko -> Karyawan (tanpa role Admin) */
 delete ROLES.admin;ROLES.owner.v.push('team');LBL.team='Toko';
