@@ -2,7 +2,14 @@
 const CONFIGURED=!/xxxx|ISI_/.test(window.SUPABASE_URL+window.SUPABASE_ANON_KEY);
 const db=CONFIGURED?supabase.createClient(window.SUPABASE_URL,window.SUPABASE_ANON_KEY):null;
 const slug=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,'.').replace(/^\.|\.$/g,'');
-const ok=async p=>{const r=await p;if(r.error){toast(r.error.message||'Terjadi kesalahan');throw r.error}return r.data};
+const isNet=e=>!navigator.onLine||(!!e&&!e.code&&/failed to fetch|networkerror|network request failed|load failed|fetch/i.test(String(e.message||e)));
+const isAuth=e=>!!e&&(e.code==='PGRST301'||e.status===401||/jwt/i.test(String(e.message||'')));
+const ok=async p=>{const r=await p;if(r.error){toast(isNet(r.error)?'Tidak ada koneksi internet':(r.error.message||'Terjadi kesalahan'));throw r.error}return r.data};
+const okq=async p=>{const r=await p;if(r.error)throw r.error;return r.data};   // tanpa toast (dipakai pemuat data)
+const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(_){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(_){return false}},del(k){try{localStorage.removeItem(k)}catch(_){}}};
+const QK='kk-queue-v1',CK='kk-cache-v1',getQ=()=>LS.get(QK,[]),setQ=q=>LS.set(QK,q);
+const uuid=()=>crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:r&3|8).toString(16)});
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fe=async e=>{try{return await e.context.text()}catch(_){return e.message}};
 const MV={in:'Stok masuk',out:'Stok keluar',adjustment:'Adjustment',sale:'Penjualan'},MVR={'Stok masuk':'in','Stok keluar':'out','Adjustment':'adjustment'};
 const idMap={};let _n=1;const lid=u=>u?(idMap[u]||(idMap[u]=_n++)):0;  // uuid -> id lokal (dipakai di onclick)
@@ -11,24 +18,55 @@ function save(){}
 
 /* ---- Muat data ---- */
 async function loadStores(){
- const st=await ok(db.from('kk_stores').select('id,name,owner_id,kk_products(count)').order('created_at'));
+ const st=await okq(db.from('kk_stores').select('id,name,owner_id,kk_products(count)').order('created_at'));
  S.stores=st.map(s=>({id:s.id,name:s.name,prods:Array(s.kk_products[0].count).fill(0),cats:[],txs:[],moves:[],week:[]}));return st}
-async function pageAll(mk){const out=[];for(let f=0;;f+=1000){const r=await ok(mk().range(f,f+999));out.push(...r);if(r.length<1000)break}return out}
-async function loadStore(id,reset){
- syncBack();S.sid=id;if(reset){S.cart=[];S.cat='Semua';S.q='';S.pq=''}
+async function pageAll(mk){const out=[];for(let f=0;;f+=1000){const r=await okq(mk().range(f,f+999));out.push(...r);if(r.length<1000)break}return out}
+const T=v=>+new Date(v),DAY40=40*864e5;
+/* Cache data toko di perangkat (untuk mode offline). Berisi data bisnis, dihapus saat keluar akun. */
+function saveData(id,d,a,b){
+ const c=LS.get(CK,{}),old=(c.data||{})[id]||{},A=T(a),B=T(b),cut=Date.now()-DAY40;
+ const outside=r=>{const x=T(r.created_at);return x<A||x>=B};
+ const merge=(o,n)=>[...(o||[]).filter(outside),...n].filter(r=>T(r.created_at)>=cut).sort((x,y)=>T(x.created_at)-T(y.created_at)).slice(-2000);
+ const entry={cats:d.cats,prods:d.prods,mv:d.mv,txs:merge(old.txs,d.txs),mvr:merge(old.mvr,d.mvr)};
+ c.data=c.data||{};c.data[id]=entry;c.uid=S.uid;
+ if(!LS.set(CK,c)){entry.txs=entry.txs.slice(-300);entry.mvr=entry.mvr.slice(-300);LS.set(CK,c)}}
+function saveCtx(){const c=LS.get(CK,{});c.uid=S.uid;c.role=S.user;c.sid=S.sid;c.stores=S.stores.map(s=>({id:s.id,name:s.name,owner_id:s.owner_id,n:s.prods.length}));LS.set(CK,c)}
+/* Terapkan penjualan offline yang belum tersinkron ke tampilan (stok berkurang, transaksi muncul) */
+function applyPending(id){
  const [a,b]=rangeISO();
- const [cats,prods,txs,mv,mvr]=await Promise.all([
-  ok(db.from('kk_categories').select('id,name').eq('store_id',id).order('name')),
-  ok(db.from('kk_products').select('*').eq('store_id',id).order('name')),
-  pageAll(()=>db.from('kk_transactions').select('invoice_no,payment_method,total,created_at,kk_transaction_items(product_id,name,price,qty)').eq('store_id',id).gte('created_at',a).lt('created_at',b).order('created_at')),
-  ok(db.from('kk_stock_movements').select('type,qty,note,created_at,kk_products(name)').eq('store_id',id).order('created_at',{ascending:false}).limit(50)),
-  pageAll(()=>db.from('kk_stock_movements').select('qty,created_at').eq('store_id',id).gte('created_at',a).lt('created_at',b).order('created_at'))]);
+ getQ().filter(x=>x.store===id&&x.uid===S.uid&&!x.failed).forEach(x=>{
+  x.lines.forEach(l=>{const p=S.prods.find(q=>q.uid===l.product_id);if(p)p.s=Math.max(0,p.s-l.q)});
+  const dt=new Date(x.at);if(dt>=T(a)&&dt<T(b))S.txs.push({no:'OFF-'+x.cid.slice(0,4).toUpperCase(),t:dt.toTimeString().slice(0,5),d:ymd(dt),pay:x.method,total:x.total,pending:true,items:x.lines.map(l=>({id:lid(l.product_id),n:l.n,p:l.p,q:l.q}))})})}
+function applyData(id,d){
+ const [a,b]=rangeISO(),inR=r=>{const x=T(r.created_at);return x>=T(a)&&x<T(b)};
+ const cats=d.cats,prods=d.prods,txs=d.txs.filter(inR),mvr=d.mvr.filter(inR);
  S.catRows=cats;S.cats=cats.map(c=>c.name);S.cats.forEach(c=>hue[c]=hue[c]||'200 55% 88%');
  S.prods=prods.map(p=>({id:lid(p.id),uid:p.id,n:p.name,c:(cats.find(c=>c.id===p.category_id)||{}).name||'-',p:+p.price,m:+p.cost,s:p.stock,min:p.min_stock}));
  S.txs=txs.map(t=>{const dt=new Date(t.created_at);return{no:t.invoice_no,t:dt.toTimeString().slice(0,5),d:ymd(dt),pay:t.payment_method,total:+t.total,items:t.kk_transaction_items.map(i=>({id:lid(i.product_id),n:i.name,p:+i.price,q:i.qty}))}});
  S.mvIn=mvr.filter(m=>m.qty>0).reduce((x,m)=>x+m.qty,0);S.mvOut=mvr.filter(m=>m.qty<0).reduce((x,m)=>x-m.qty,0);
- S.moves=mv.map(m=>({t:new Date(m.created_at).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}),n:(m.kk_products||{}).name||'(produk dihapus)',type:MV[m.type],q:m.qty,note:m.note||'-'}));
- syncBack()}
+ S.moves=d.mv.map(m=>({t:new Date(m.created_at).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}),n:(m.kk_products||{}).name||'(produk dihapus)',type:MV[m.type],q:m.qty,note:m.note||'-'}));
+ applyPending(id);syncBack()}
+async function loadStore(id,reset){
+ syncBack();const prev=S.sid;S.sid=id;if(reset){S.cart=[];S.cat='Semua';S.q='';S.pq=''}
+ const [a,b]=rangeISO();let d;
+ try{
+  const [cats,prods,txs,mv,mvr]=await Promise.all([
+   okq(db.from('kk_categories').select('id,name').eq('store_id',id).order('name')),
+   okq(db.from('kk_products').select('*').eq('store_id',id).order('name')),
+   pageAll(()=>db.from('kk_transactions').select('invoice_no,payment_method,total,created_at,kk_transaction_items(product_id,name,price,qty)').eq('store_id',id).gte('created_at',a).lt('created_at',b).order('created_at')),
+   okq(db.from('kk_stock_movements').select('type,qty,note,created_at,kk_products(name)').eq('store_id',id).order('created_at',{ascending:false}).limit(50)),
+   pageAll(()=>db.from('kk_stock_movements').select('qty,created_at').eq('store_id',id).gte('created_at',a).lt('created_at',b).order('created_at'))]);
+  d={cats,prods,txs,mv,mvr};S.offline=false;saveData(id,d,a,b);
+ }catch(e){
+  const c=(LS.get(CK,{}).data||{})[id];
+  if(isNet(e)&&c){d={cats:c.cats,prods:c.prods,txs:c.txs||[],mv:c.mv||[],mvr:c.mvr||[]};S.offline=true}
+  else{S.sid=prev;toast(isNet(e)?'Tidak ada koneksi, dan data toko ini belum tersimpan di perangkat':(e.message||'Terjadi kesalahan'));throw e}}
+ applyData(id,d)}
+/* Siapkan data toko lain di perangkat agar bisa dibuka saat offline */
+async function prefetchStores(){
+ for(const s of S.stores){if(s.id===S.sid||(LS.get(CK,{}).data||{})[s.id])continue;
+  try{const [cats,prods]=await Promise.all([okq(db.from('kk_categories').select('id,name').eq('store_id',s.id)),okq(db.from('kk_products').select('*').eq('store_id',s.id))]);
+   const c=LS.get(CK,{});c.data=c.data||{};c.data[s.id]={cats,prods,mv:[],txs:[],mvr:[]};LS.set(CK,c)}catch(_){return}}}
 async function loadStaff(){
  if(S.user!=='owner'){S.users=[{id:S.uid,role:'kasir',stores:S.stores.map(s=>s.id)}];return}
  const rows=await ok(db.from('kk_members').select('user_id,name,store_id,kk_member_secrets(password_plain)'));const g={};
@@ -40,19 +78,35 @@ async function newStore(name,uid){
  await ok(db.from('kk_categories').insert(DEFCATS.map(n=>({store_id:s.id,name:n}))));return s}
 
 /* ---- Auth ---- */
+const pickView=()=>{const v=new URLSearchParams(location.search).get('v');return v&&ROLES[S.user].v.includes(v)?v:ROLES[S.user].v[0]};
+const hasToken=()=>Object.keys(localStorage).some(k=>/^sb-.*-auth-token/.test(k));
+async function bootOffline(ctx){
+ S.uid=ctx.uid;S.user=ctx.role;S.offline=true;
+ S.stores=ctx.stores.map(s=>({id:s.id,name:s.name,owner_id:s.owner_id,prods:Array(s.n).fill(0),cats:[],txs:[],moves:[],week:[]}));
+ S.users=[{id:S.uid,role:'kasir',stores:S.stores.map(s=>s.id)}];
+ try{await loadStore(S.stores.some(s=>s.id===ctx.sid)?ctx.sid:S.stores[0].id,true)}catch(e){S.user=null;S.uid=null;render();return}
+ S.view=pickView();render()}
 async function boot(){
  if(!CONFIGURED){S.user=null;render();return}
- const {data:{session}}=await db.auth.getSession();
- if(!session){S.user=null;render();return}
+ let session=null;try{session=(await db.auth.getSession()).data.session}catch(e){}
+ const ctx=LS.get(CK,null);
+ if(!session){
+  if(ctx&&ctx.stores&&(!navigator.onLine||hasToken()))return bootOffline(ctx);
+  S.user=null;render();return}
  const u=session.user;S.uid=u.id;
  try{let st=await loadStores();
   const sn=u.user_metadata&&u.user_metadata.store_name;
   if(!st.length&&sn){await newStore(sn,u.id);st=await loadStores()}
   if(!st.length){toast('Akun ini belum ditugaskan ke toko');await db.auth.signOut();S.user=null;render();return}
   S.user=st.some(s=>s.owner_id===u.id)?'owner':'kasir';
-  await loadStore(S.stores[0].id,true);await loadStaff();
- }catch(e){S.user=null;render();return}
- S.view=ROLES[S.user].v[0];render()}
+  S.sid=(ctx&&ctx.uid===u.id&&S.stores.some(x=>x.id===ctx.sid))?ctx.sid:S.stores[0].id;
+  await syncQueue();                         // kirim penjualan offline yang tertunda sebelum memuat data
+  await loadStore(S.sid,true);await loadStaff();saveCtx();prefetchStores();
+ }catch(e){
+  if(isNet(e)&&ctx&&ctx.uid===u.id&&ctx.stores)return bootOffline(ctx);
+  if(!isNet(e))toast(e.message||'Terjadi kesalahan');
+  S.user=null;render();return}
+ S.view=pickView();render()}
 function login(){document.getElementById('nav').style.display='none';
  $(`<div style="max-width:380px;margin:8vh auto 0"><div class="brand" style="padding:0 0 6px;font-size:30px">Kasir<b>Ku</b></div><p class="sub">Masuk untuk mulai berjualan</p>
  ${CONFIGURED?'':'<div class="card" style="border-color:var(--warn);margin-bottom:12px">Supabase belum disambungkan. Isi <b>config.js</b> dengan URL dan anon key project Anda.</div>'}
@@ -62,7 +116,7 @@ function login(){document.getElementById('nav').style.display='none';
 async function doLogin(){if(!CONFIGURED){toast('Isi config.js dulu');return}
  const v=gv('ln').trim();if(!v){toast('Isi nama atau email');return}
  const {error}=await db.auth.signInWithPassword({email:v.includes('@')?v:slug(v)+'@kasirku.app',password:gv('lp')});
- if(error){toast('Nama/email atau kata sandi salah');return}await boot()}
+ if(error){toast(isNet(error)?'Tidak ada koneksi internet':'Nama/email atau kata sandi salah');return}await boot()}
 function regForm(){$(`<div style="max-width:380px;margin:8vh auto 0"><div class="brand" style="padding:0 0 6px;font-size:30px">Kasir<b>Ku</b></div><p class="sub">Daftar sebagai Owner</p>
  <div class="card f"><label>Nama toko<input id="rs"></label><label>Email<input id="re" type="email" autocomplete="email"></label><label>Kata sandi (minimal 6 karakter)<input id="rp" type="password" autocomplete="new-password"></label>
  <button class="btn" onclick="doReg()">Daftar</button></div><p class="sm" style="margin-top:12px"><a href="#" onclick="login();return false" style="color:var(--em-d)">Kembali ke halaman masuk</a></p></div>`)}
@@ -70,14 +124,105 @@ async function doReg(){if(!CONFIGURED){toast('Isi config.js dulu');return}
  const sn=gv('rs').trim(),email=gv('re').trim(),password=gv('rp');if(!sn||!email||password.length<6){toast('Lengkapi nama toko, email, dan kata sandi (min. 6)');return}
  const {data,error}=await db.auth.signUp({email,password,options:{data:{store_name:sn}}});if(error){toast(error.message);return}
  if(!data.session){toast('Cek email Anda untuk konfirmasi, lalu masuk');login();return}await boot()}
-async function logout(){if(db)await db.auth.signOut();S.user=null;S.uid=null;S.cart=[];render()}
-async function switchStore(id){await loadStore(id,true);render()}
+async function logout(){
+ if(getQ().some(x=>x.uid===S.uid&&!x.failed)&&!confirm('Ada penjualan offline yang belum terkirim. Data tetap tersimpan dan akan dikirim saat Anda masuk lagi. Tetap keluar?'))return;
+ try{if(db)await db.auth.signOut({scope:'local'})}catch(_){}
+ Object.keys(localStorage).filter(k=>/^sb-.*-auth-token/.test(k)).forEach(k=>LS.del(k));
+ LS.del(CK);S.user=null;S.uid=null;S.cart=[];S.offline=false;S.needLogin=false;render()}
+async function switchStore(id){try{await loadStore(id,true)}catch(e){render();return}saveCtx();render()}
 
-/* ---- Penjualan ---- */
+/* ---- Penjualan (bisa offline: masuk antrean, dikirim otomatis saat online) ---- */
+async function rpcCheckout(x){
+ const base={p_store:x.store,p_method:x.method,p_items:x.items};
+ let r=await db.rpc('kk_checkout',{...base,p_client_id:x.cid,p_at:x.at});
+ // Migrasi 3 belum dijalankan? Pakai versi lama (tanpa perlindungan transaksi ganda)
+ if(r.error&&(r.error.code==='PGRST202'||/could not find the function/i.test(r.error.message||'')))r=await db.rpc('kk_checkout',base);
+ return r}
 const _fin2=finish;
-finish=async function(){const items=S.cart.map(i=>({product_id:prod(i.id).uid,qty:i.q})),b=document.getElementById('ok');if(b)b.disabled=true;
- try{await ok(db.rpc('kk_checkout',{p_store:S.sid,p_method:S.pay,p_items:items}))}catch(e){if(b)b.disabled=false;return}
- _fin2();loadStore(S.sid)};
+finish=async function(){
+ const b=document.getElementById('ok');if(b)b.disabled=true;
+ const lines=S.cart.map(i=>({product_id:prod(i.id).uid,n:i.n,p:i.p,q:i.q}));
+ const x={cid:uuid(),uid:S.uid,store:S.sid,method:S.pay,at:new Date().toISOString(),items:lines.map(l=>({product_id:l.product_id,qty:l.q})),lines,total:lines.reduce((t,l)=>t+l.p*l.q,0)};
+ if(navigator.onLine){
+  const r=await rpcCheckout(x);
+  if(!r.error){_fin2();loadStore(S.sid).then(()=>banner()).catch(()=>{});return}
+  if(!isNet(r.error)){toast(r.error.message||'Terjadi kesalahan');if(b)b.disabled=false;return}
+ }
+ // Tidak ada koneksi: simpan ke antrean di perangkat
+ if(!setQ([...getQ(),x])){toast('Penyimpanan perangkat penuh, penjualan tidak tersimpan');if(b)b.disabled=false;return}
+ _fin2();S.offline=true;
+ const tx=S.txs[S.txs.length-1];tx.no='OFF-'+x.cid.slice(0,4).toUpperCase();tx.pending=true;tx.d=ymd(new Date());
+ const sub=document.querySelector('#modal .sub');if(sub)sub.textContent=tx.no+' · tersimpan offline, dikirim otomatis saat online';
+ banner()};
+
+let syncing=false,goingOnline=false;
+async function syncQueue(){
+ if(syncing||!navigator.onLine||!S.uid)return 0;syncing=true;let done=0;
+ try{for(;;){
+  const it=getQ().find(x=>x.uid===S.uid&&!x.failed);if(!it)break;
+  const r=await rpcCheckout(it);
+  if(!r.error){setQ(getQ().filter(x=>x.cid!==it.cid));done++;continue}
+  if(isNet(r.error))break;
+  if(isAuth(r.error)){S.needLogin=true;break}
+  setQ(getQ().map(x=>x.cid===it.cid?{...x,failed:r.error.message||'Gagal'}:x));toast('Ada penjualan offline yang gagal dikirim')}
+ }finally{syncing=false}
+ if(done)toast(done+' penjualan offline berhasil dikirim');
+ return done}
+async function goOnline(){
+ if(!S.user||!navigator.onLine||goingOnline)return;goingOnline=true;
+ try{
+  const wasOff=S.offline;
+  if(wasOff){let ss=null;try{ss=(await db.auth.getSession()).data.session}catch(_){}
+   if(!ss){S.needLogin=true;return}S.needLogin=false}
+  const n=await syncQueue();
+  if(wasOff||n){try{await loadStore(S.sid);if(wasOff)await loadStaff();saveCtx()}catch(_){}
+   if(!S.offline&&S.view!=='pos'&&!document.getElementById('modal').classList.contains('on'))render()}
+ }finally{goingOnline=false;banner()}}
+function queueM(){
+ const q=getQ().filter(x=>x.uid===S.uid);
+ openM(`<div class="sheet"><h3>Penjualan offline</h3>${q.map(x=>`<div class="row"><div><b>OFF-${x.cid.slice(0,4).toUpperCase()}</b> <span class="sm">${new Date(x.at).toLocaleString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span><br><span class="sm">${x.lines.map(l=>esc(l.n)+' ×'+l.q).join(', ')}</span><br>${x.failed?`<span class="tag w">Gagal: ${esc(x.failed)}</span>`:'<span class="tag">Menunggu sinkron</span>'}</div>
+  <div style="text-align:right"><b>${rp(x.total)}</b>${x.failed?`<br><button class="chip" onclick="retryQ('${x.cid}')">Coba lagi</button><button class="chip" onclick="dropQ('${x.cid}')">Hapus</button>`:''}</div></div>`).join('')||'<div class="empty">Tidak ada antrean.</div>'}
+ <button class="btn" style="margin-top:12px" onclick="closeM()">Tutup</button></div>`)}
+function retryQ(c){setQ(getQ().map(x=>{if(x.cid!==c)return x;const{failed,...r}=x;return r}));closeM();goOnline()}
+function dropQ(c){setQ(getQ().filter(x=>x.cid!==c));queueM();banner();loadStore(S.sid).then(()=>render()).catch(()=>{})}
+
+/* ---- PWA: banner status, update, pasang aplikasi ---- */
+let installEv=null;
+const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent),standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEv=e;banner()});
+addEventListener('appinstalled',()=>{installEv=null;banner()});
+async function installApp(){if(!installEv)return;installEv.prompt();try{await installEv.userChoice}catch(_){}installEv=null;banner()}
+function applyUpdate(){const w=S.upd&&S.upd.waiting;if(w)w.postMessage('SKIP_WAITING');else location.reload()}
+function banner(){
+ const app=document.getElementById('app');let el=document.getElementById('pwa');
+ if(!S.user){if(el)el.remove();return}
+ const q=getQ().filter(x=>x.uid===S.uid),pend=q.filter(x=>!x.failed).length,fail=q.length-pend,off=S.offline||!navigator.onLine,P=[];
+ if(off)P.push('<b>Mode offline.</b> Penjualan tetap bisa dicatat.');
+ if(pend)P.push(pend+' penjualan menunggu dikirim');
+ if(fail)P.push(`<a href="#" onclick="queueM();return false" style="color:var(--warn)">${fail} penjualan gagal dikirim</a>`);
+ if(S.needLogin)P.push('Sesi berakhir. <a href="#" onclick="logout();return false" style="color:var(--em-d)">Masuk lagi</a> agar data terkirim.');
+ if(S.upd)P.push('Versi baru tersedia <button class="chip" onclick="applyUpdate()">Muat ulang</button>');
+ if(installEv)P.push('<button class="chip" onclick="installApp()">Pasang aplikasi</button>');
+ if(isIOS&&!standalone&&!LS.get('kk-ios-hint',0))P.push('Di iPhone: ketuk Bagikan, lalu Tambah ke Layar Utama <button class="chip" onclick="LS.set(\'kk-ios-hint\',1);banner()">Tutup</button>');
+ if(!P.length){if(el)el.remove();return}
+ if(!el){el=document.createElement('div');el.id='pwa';el.className='card';el.style.cssText='margin-bottom:12px;padding:10px 14px;font-size:13px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center'}
+ el.style.borderColor=(off||fail||S.needLogin)?'var(--warn)':'var(--em)';
+ el.innerHTML=P.map(x=>`<span>${x}</span>`).join('');
+ if(app.firstChild!==el)app.prepend(el)}
+const _render=render;render=function(){_render();banner()};
+addEventListener('online',()=>goOnline());
+addEventListener('offline',()=>{S.offline=true;banner()});
+setInterval(()=>{if(S.user&&navigator.onLine&&(S.offline||getQ().some(x=>x.uid===S.uid&&!x.failed)))goOnline()},30000);
+if('serviceWorker'in navigator){
+ const had=!!navigator.serviceWorker.controller;
+ addEventListener('load',async()=>{try{
+  const reg=await navigator.serviceWorker.register('sw.js');
+  const watch=w=>w&&w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller){S.upd=reg;banner()}});
+  if(reg.waiting&&navigator.serviceWorker.controller){S.upd=reg;banner()}
+  reg.addEventListener('updatefound',()=>watch(reg.installing));
+  setInterval(()=>reg.update().catch(()=>{}),36e5);
+  let rl=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(had&&!rl){rl=true;location.reload()}});
+ }catch(e){}})}
 
 /* ---- Produk, kategori, stok ---- */
 async function saveP(id){const n=gv('fn').trim();if(!n||!+gv('fp')){toast('Isi nama dan harga jual');return}
@@ -167,7 +312,7 @@ dash=function(){
 txView=function(){const multi=S.from!==S.to;
  $(`<h1>Transaksi</h1><p class="sub">${S.txs.length} transaksi ${rangeLabel()}</p>${dateBar()}
  <div class="card scroll"><table><tr><th>Invoice</th><th>${multi?'Tanggal':'Jam'}</th><th>Metode</th><th>Total</th></tr>
- ${[...S.txs].reverse().map(t=>`<tr style="cursor:pointer" onclick="txDetail('${t.no}')"><td><b>${t.no}</b></td><td>${multi?fmtD(t.d)+', '+t.t:t.t}</td><td>${t.pay}</td><td>${rp(t.total)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Tidak ada transaksi pada periode ini.</td></tr>'}</table></div>`)};
+ ${[...S.txs].reverse().map(t=>`<tr style="cursor:pointer" onclick="txDetail('${t.no}')"><td><b>${t.no}</b>${t.pending?' <span class="tag w">offline</span>':''}</td><td>${multi?fmtD(t.d)+', '+t.t:t.t}</td><td>${t.pay}</td><td>${rp(t.total)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Tidak ada transaksi pada periode ini.</td></tr>'}</table></div>`)};
 
 /* Laporan */
 rep=function(){const rev=S.txs.reduce((s,t)=>s+t.total,0),n=S.txs.length;
